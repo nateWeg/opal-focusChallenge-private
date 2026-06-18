@@ -11,6 +11,7 @@ A student-led pilot wrapped in a fun, shareable challenge. Students at a school 
 ## The plan
 
 - Full plan: [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)
+- Screen-time data reliability (how the number is produced, how accurate, known traps): [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md)
 - Living Notion copy (for comments/annotations): https://app.notion.com/p/382c494896d2819c9214e57666dd0a02
 - Context for Claude Code sessions: [`CLAUDE.md`](CLAUDE.md)
 

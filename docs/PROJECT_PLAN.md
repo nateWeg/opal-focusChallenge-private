@@ -58,14 +58,15 @@ Before building anything, answer one open-ended question: **is the daily screen 
 
 ## The metric: hours saved (the key metric)
 
-**Hours saved is the key metric the FocusBoard runs on.** It's calculated from each user's **self-reported baseline screen time (entered at onboarding) minus their measured daily screen time**:
+**Hours saved is the key metric the FocusBoard runs on.** It's each user's **measured daily screen time subtracted from a fixed baseline that's the same for everyone**:
 
 **Hours saved = baseline − daily screen time.**
 
-- **Baseline** (self-reported at onboarding): `dim_users.stated_screentime_seconds`; default 4.5h if unset. **Frozen at join** — captured once when the student joins and never re-read, so they **can't later inflate their baseline to game their hours saved**.
-- **Actual screen time** (iOS-measured, per day): `screentime_benchmarks.screentime_seconds`. **Score completed days only** — the latest day counted is the **previous calendar day**; today is excluded until it closes (today is still accumulating; matches Opal's own benchmark, which records the prior day).
+- **Baseline** — a **fixed 7 hours (25,200s) for every user**: Gen Z averages **6.5 h/day** of phone screen time ([HarmonyHIT, *Phone Screen Time Statistics*](https://www.harmonyhit.com/phone-screen-time-statistics/)), rounded up to 7 h. Not self-reported and not per-user: there's no number to inflate and nothing to freeze at join. *(Note: the cited figure is phone screen time — a reasonable match for Opal's whole-device total — but still worth re-sourcing against Opal's own cohort average before a public, school-facing launch. A fixed bar also rewards being a light user as much as actively reducing usage; acceptable for a first prototype, revisit personalization later.)*
+- **Actual screen time** (iOS-measured, per day): `screentime_benchmarks.screentime_seconds` — **whole-device total** screen time (confirmed in the codebase; see [`SCREENTIME_DATA_GUIDE.md`](SCREENTIME_DATA_GUIDE.md)). **Score completed days only** — the latest day counted is the **previous calendar day**; today is excluded until it closes (today is still accumulating; matches Opal's own benchmark, which records the prior day).
+- **A day with 0 / null / missing screen time scores 0 hours saved** — never `baseline − 0`. Absence means "no data," not "saved a full day."
 
-Per day: `dayHoursSaved = max(0, baseline − screentime) / 3600` (floored at 0).
+Per day: `dayHoursSaved = max(0, 25200 − screentime_seconds) / 3600` (floored at 0; only for days with a real screentime value).
 
 ## How the daily accrual works (counting each day exactly once)
 
@@ -77,63 +78,68 @@ Per day: `dayHoursSaved = max(0, baseline − screentime) / 3600` (floored at 0)
 
 Stored **only on the FocusBoard** (never read back from Firebase/Snowflake):
 
-- **Per user:** `total_hours_saved` (running total since joining) + `baselineSeconds` (frozen) + `joined_date` + `last_counted_date`.
+- **Per user:** `total_hours_saved` (running total since joining) + `joined_date` + `last_counted_date`. *(No per-user baseline — the 7h baseline is a single global constant.)*
 - **Team total** = sum of members' `total_hours_saved`, recomputed each run → drives the progress bar toward 100.
 
 The warehouse only **serves recent daily screen time** (a rolling ~7-day window); the FocusBoard does the accumulating.
 
 ## ⛔ Prerequisite — warehouse data Julien must provide
 
-Not in the warehouse today; Julien extracts it daily from Firebase:
+Not in the warehouse today; Julien extracts it daily from Firebase. **No baseline column is needed** — the baseline is a fixed 7h constant in the updater, so `dim_users` is used as-is (`user_id`, `gem`, `school`):
 
-1. **`dim_users`** (already has `user_id`, `gem`, `school`) **+ a new column `stated_screentime_seconds`** (the baseline).
-2. **`screentime_benchmarks`** — recent daily screen time per user; grain one row per `(user_id, activity_date)`; columns `user_id`, `activity_date`, `screentime_seconds`, `update_date`. **Only a recent window needed** (≈ last 7 days). Must extract **≥ daily** so no day ages out of Firestore's 7-day window before it's counted.
+1. **`screentime_benchmarks`** — recent daily screen time per user; grain one row per `(user_id, activity_date)`; columns `user_id`, `activity_date`, `screentime_seconds`, `update_date`. **Only a recent window needed** (≈ last 7 days). Must extract **≥ daily**, and **set `activity_date` from the Firestore doc's `date` field** (not extraction time). The source `realtimeScreentimeBenchmarks` is a **7-slot weekday ring buffer** (doc id `<userID>-<dayOfWeek>`, overwritten weekly), *not* a 7-day log — so a day with no upload leaves **last week's** value sitting in that weekday's slot. Keying on `date` means a stale slot carries an old `activity_date` and is harmlessly skipped (≤ `last_counted_date`); extracting ≥ daily means no real day is overwritten before it's pulled. See [`SCREENTIME_DATA_GUIDE.md`](SCREENTIME_DATA_GUIDE.md).
 
 **Open question for Julien:** easier to pull **all users'** recent screen time, or only the **specific gem names** that opted in? *(All = decoupled/future-proof but more data; opted-in = leaner but couples the extraction to the roster. Julien's call.)*
 
 ## The data, concretely (sample rows)
 
 ```
-DIM_USERS  (exists; Julien adds stated_screentime_seconds = baseline)
- user_id   | gem         | school | stated_screentime_seconds
- fb_8x2k…  | AzureHawk   | Opal   | 21600  (6.0h)
+DIM_USERS  (exists; no new column needed — baseline is a fixed constant, not stored here)
+ user_id   | gem         | school
+ fb_8x2k…  | AzureHawk   | Opal
 
 SCREENTIME_BENCHMARKS  (recent ~7 days per user — Julien builds)
  user_id   | activity_date | screentime_seconds | update_date
  fb_8x2k…  | 2026-06-16    | 14400  (4.0h)      | 2026-06-17 08:03Z
 
+BASELINE = 25200  (fixed 7h, same for everyone — lives in the updater, not the warehouse)
+
 OUR STORE  (the only persisted metric — on the FocusBoard)
- user_id  | gem        | baseline_s | total_hours_saved | joined_date | last_counted_date
- fb_8x2k… | AzureHawk  | 21600      | 8.0               | 2026-06-13  | 2026-06-16
+ user_id  | gem        | total_hours_saved | joined_date | last_counted_date
+ fb_8x2k… | AzureHawk  | 8.0               | 2026-06-13  | 2026-06-16
 ```
 
-On 6/16, AzureHawk's measured 4.0h vs 6.0h baseline = **+2.0h** added; `last_counted_date` moves to 6/16. Days before 6/13 (join) never count.
+On 6/16, AzureHawk's measured 4.0h vs the fixed 7.0h baseline = **+3.0h** added; `last_counted_date` moves to 6/16. Days before 6/13 (join) never count.
 
 ## Data-pulling flow
 
 ```
 ONBOARD  (once per member, to seed the team)
   gem  →  resolve gem → user_id via dim_users (lower(gem); 0/>1 matches → review)
-       →  freeze baseline; store { user_id, gem, baselineSeconds,
+       →  store { user_id, gem,
             total_hours_saved: 0, joined_date: today, last_counted_date: today }
+
+BASELINE = 25200   (fixed 7h, same for everyone)
 
 DAILY PULL  (once/day, every member — daily because it's a daily game)
   for each user_id:
      pull recent days WHERE activity_date > last_counted_date
-     for each day on/after joined_date AND ≤ yesterday:
-        total_hours_saved += max(0, baselineSeconds − screentime_seconds)/3600
-        move last_counted_date forward
+     for each day on/after joined_date AND ≤ yesterday (oldest→newest):
+        if screentime_seconds is a real value > 0:
+           total_hours_saved += max(0, BASELINE − screentime_seconds)/3600
+        # 0 / null / missing → contributes nothing
+        last_counted_date = that day   # advance even on a no-data day so it can't stall
   team_total = Σ members.total_hours_saved
   write leaderboard-data.json  →  website renders the progress bar + rows
 ```
 
 ## Implementation
 
-**0. (Julien, prerequisite — starts with Pre-Prototype 1)** Make accessible in the warehouse: `stated_screentime_seconds` on `dim_users`, and the `screentime_benchmarks` table.
+**0. (Julien, prerequisite — starts with Pre-Prototype 1)** Make the `screentime_benchmarks` table accessible in the warehouse. *(No baseline column needed — the 7h baseline is a constant in the updater, not stored per user.)*
 
 **A. updater (Python)**
 
-1. Roster + running-total store (JSON): `{ user_id, gem, baselineSeconds, total_hours_saved, joined_date, last_counted_date }`.
+1. Roster + running-total store (JSON): `{ user_id, gem, total_hours_saved, joined_date, last_counted_date }`.
 2. `build_leaderboard.py` — onboard (resolve gem→user_id, freeze baseline, set join date) + daily pull (query the warehouse, add each not-yet-counted completed day from the join date onward, sum the team total). Writes `leaderboard-data.json`.
 
 **B. website (Next.js)**
@@ -151,10 +157,13 @@ DAILY PULL  (once/day, every member — daily because it's a daily game)
 
 ## Data reliability & handling
 
-- **Screen time only exists for days the user opened Opal** (no background upload). Missing day → 0 saved.
+- **Screen time only exists for days the user opened Opal** (the upload is a daily on-foreground chore; it's also skipped for brand-new users, users with no age set, and zero-screen-time days). A day with no row is simply not counted.
+- **0 / null / missing screen time → 0 hours saved** — never `baseline − 0`. Absence is "no data," not a saved day.
+- **~15-minute accuracy floor.** The number is Apple-DeviceActivity-quantized (≈15-min granularity) — fine for a daily hours-saved metric, not a precise per-minute figure. See [`SCREENTIME_DATA_GUIDE.md`](SCREENTIME_DATA_GUIDE.md).
+- **Stale-weekday-slot guard:** key on the Firestore doc's `date` field (carried into `activity_date`), not the mere existence of a row — the source is a 7-slot weekday ring buffer (see prerequisite + guide).
 - **Each day counted once, from the join date**; re-runs are safe; a missed day backfills while still in the warehouse's recent window.
 - **~24–48h latency** (Firebase→warehouse, then the updater) — fine for a daily game.
-- **Baseline frozen at join** (anti-gaming).
+- **Fixed 7h baseline** — same for everyone, not self-reported (interim figure; see the metric note).
 - **iOS-only assumption** for the pilot.
 - Keep an `isFlagged` sanity check (≥2 days under 1h).
 
@@ -177,8 +186,8 @@ Once the data + progress bar are proven: the **7-day challenge** with a countdow
 
 ## Open questions / to verify
 
-1. **(Pre-Prototype 1)** Is the daily screen time data reliable? Julien exposes Nate's recent daily screen time; Nate checks it matches his real usage with no gaps.
-2. Whether `screentime_seconds` is whole-device or tracked-apps-only (must match the baseline's basis).
+1. **(Pre-Prototype 1)** Daily screen-time reliability — *producer-side architecture validated* (whole-device total, ~15-min accuracy, gap/overwrite behavior; see [`SCREENTIME_DATA_GUIDE.md`](SCREENTIME_DATA_GUIDE.md)). Still pending: Nate's empirical spot-check that his own recent daily numbers match his real usage with no gaps.
+2. ~~Whether `screentime_seconds` is whole-device or tracked-apps-only.~~ **Resolved: whole-device total** (`AppScreenTimeStore.loadTotalScreenTime`). The fixed 7h baseline uses Gen Z phone screen time (6.5 h → 7 h, [HarmonyHIT](https://www.harmonyhit.com/phone-screen-time-statistics/)), a reasonable match for the whole-device basis — still worth re-sourcing against Opal's own cohort before a school-facing launch.
 3. Gem-match review for unmatched/ambiguous typed gems.
 
 ## Verification (real data — no synthetic)

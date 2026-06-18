@@ -1,6 +1,6 @@
 # CLAUDE.md — Opal FocusBoard context
 
-Context for any Claude Code session working in this repo (Nate's or Julien's). Read [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) for the full plan; this is the quick orientation.
+Context for any Claude Code session working in this repo (Nate's or Julien's). Read [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) for the full plan and [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md) for how the screen-time number is produced and how reliable it is; this is the quick orientation.
 
 ## What this is
 
@@ -12,14 +12,14 @@ Reliably pull **daily hours saved — per person and for the whole team — from
 
 ## The metric (the key metric)
 
-**Hours saved = self-reported baseline screen time (entered at onboarding) − measured daily screen time.** Per day, floored at 0. Score **completed days only** (latest = yesterday; today is still accumulating).
+**Hours saved = a fixed 7h (25,200s) baseline − measured daily screen time.** Per day, floored at 0; the baseline is the same for everyone (not self-reported, not per-user). Score **completed days only** (latest = yesterday; today is still accumulating). A day with 0/null/missing screen time scores 0 saved (never `baseline − 0`).
 
 ## Data model (how it works)
 
 - **Linking:** a student gives their **gem** (Opal username) → resolve to their Opal **`user_id`** via `dim_users` (`lower(gem)` match). The stable `user_id` keys all data; gems can change. **No login in Prototype 1.**
-- **Source:** the warehouse only serves **recent daily screen time** (a rolling ~7-day window) — `screentime_benchmarks(user_id, activity_date, screentime_seconds, update_date)` — plus the baseline `dim_users.stated_screentime_seconds`.
+- **Source:** the warehouse only serves **recent daily screen time** (a rolling ~7-day window) — `screentime_benchmarks(user_id, activity_date, screentime_seconds, update_date)`, where `screentime_seconds` is **whole-device total** screen time. The baseline is a **fixed 7h constant** in the updater — no warehouse column.
 - **Accrual:** the FocusBoard stores the **only persisted metric** — a running `total_hours_saved` per user (since they joined) + a `last_counted_date` so each day is added **exactly once** (re-runs safe, missed days backfill). Count only from each user's `joined_date`. **Team total = sum of members' totals.**
-- **Baseline is frozen at join** (anti-gaming — a student can't inflate it later).
+- **Baseline:** fixed 7h, same for everyone — not self-reported, nothing to inflate. (Gen Z ≈ 6.5 h/day phone screen time rounded to 7 h — [HarmonyHIT](https://www.harmonyhit.com/phone-screen-time-statistics/); see [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md).)
 - **Assumption:** all participants are **iOS users**.
 
 ## Where things live
@@ -29,7 +29,7 @@ Reliably pull **daily hours saved — per person and for the whole team — from
 
 ## Immediate next step (gating everything)
 
-**Pre-Prototype 1 — "Is the daily screen time data reliable?"** Julien exposes Nate's recent daily screen time in the warehouse; Nate checks it matches his real usage (no gaps, right basis: whole-device vs tracked-apps). Nothing downstream is built until this checks out.
+**Pre-Prototype 1 — "Is the daily screen time data reliable?"** Producer-side is answered: it's **whole-device total**, ~15-min accurate, with known gap/overwrite behavior (see [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md)). Still gating: Julien exposes Nate's recent daily screen time in the warehouse and Nate confirms it matches his real usage (no gaps). Nothing downstream is built until that empirical check passes.
 
 ## Collaborators
 
