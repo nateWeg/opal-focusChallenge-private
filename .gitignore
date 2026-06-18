@@ -1,0 +1,30 @@
+# Node / Next.js (web)
+node_modules/
+.next/
+out/
+dist/
+npm-debug.log*
+yarn-error.log*
+
+# Python (updater)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# Env / secrets
+.env
+.env.*
+*.local
+.streamlit/secrets.toml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Generated board data / local state
+leaderboard-data.json
+*-ledger.json
