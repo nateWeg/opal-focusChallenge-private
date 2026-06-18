@@ -17,7 +17,7 @@ Reliably pull **daily hours saved — per person and for the whole team — from
 ## Data model (how it works)
 
 - **Linking:** a student gives their **gem** (Opal username) → resolve to their Opal **`user_id`** via `dim_users` (`lower(gem)` match). The stable `user_id` keys all data; gems can change. **No login in Prototype 1.**
-- **Source:** the warehouse only serves **recent daily screen time** (a rolling ~7-day window) — `screentime_benchmarks(user_id, activity_date, screentime_seconds, update_date)`, where `screentime_seconds` is **whole-device total** screen time. The baseline is a **fixed 7h constant** in the updater — no warehouse column.
+- **Source:** screen time is read **directly from Firestore** for Prototype 1 — `realtimeScreentimeBenchmarks` (≤7 weekday slots/user, overwritten weekly; field `screentime`, seconds, **whole-device total**). The warehouse is used **only** for the gem→user_id lookup (`dim_users`). Baseline is a **fixed 7h constant** in the updater. (Landing screen time in Snowflake is deferred to the schools rollout.)
 - **Accrual:** the FocusBoard stores the **only persisted metric** — a running `total_hours_saved` per user (since they joined) + a `last_counted_date` so each day is added **exactly once** (re-runs safe, missed days backfill). Count only from each user's `joined_date`. **Team total = sum of members' totals.**
 - **Baseline:** fixed 7h, same for everyone — not self-reported, nothing to inflate. (Gen Z ≈ 6.5 h/day phone screen time rounded to 7 h — [HarmonyHIT](https://www.harmonyhit.com/phone-screen-time-statistics/); see [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md).)
 - **Assumption:** all participants are **iOS users**.
@@ -25,11 +25,11 @@ Reliably pull **daily hours saved — per person and for the whole team — from
 ## Where things live
 
 - **This repo (`opal-focusboard`):** the FocusBoard website (`/web`, Next.js) + the data updater (`/updater`, Python). *(Not built yet.)*
-- **`opal-data`** (separate repo, Julien's domain): the Snowflake warehouse + the Firebase→warehouse extraction Julien must build. The updater reads from the warehouse via that repo's Snowflake client pattern (`streamlit_app/database/snowflake_client.py`).
+- **`opal-data`** (separate repo, Julien's domain): the Snowflake warehouse, used here **only** for the gem→user_id lookup (via that repo's Snowflake client pattern, `streamlit_app/database/snowflake_client.py`). Screen time is read **directly from Firestore**; landing it in Snowflake is deferred to the schools rollout.
 
 ## Immediate next step (gating everything)
 
-**Pre-Prototype 1 — "Is the daily screen time data reliable?"** Producer-side is answered: it's **whole-device total**, ~15-min accurate, with known gap/overwrite behavior (see [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md)). Still gating: Julien exposes Nate's recent daily screen time in the warehouse and Nate confirms it matches his real usage (no gaps). Nothing downstream is built until that empirical check passes.
+**Pre-Prototype 1 — "Is the daily screen time data reliable?"** Producer-side is answered: it's **whole-device total**, ~15-min accurate, with known gap/overwrite behavior (see [`docs/SCREENTIME_DATA_GUIDE.md`](docs/SCREENTIME_DATA_GUIDE.md)). Still gating: pull Nate's recent daily screen time from Firestore (`realtimeScreentimeBenchmarks`) and confirm it matches his real usage (no gaps). Nothing downstream is built until that empirical check passes.
 
 ## Collaborators
 

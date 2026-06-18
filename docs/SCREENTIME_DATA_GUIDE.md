@@ -30,10 +30,10 @@ Source of truth in the iOS app (`opal-apple-monorepo`):
 
 - The app uploads **yesterday's** total via a **daily chore that runs on app foreground**. So a fresh
   value appears whenever the user next opens Opal.
-- End-to-end to the warehouse: **~24–48h** (on-device → Firebase, then Firebase → Snowflake → updater).
-  Acceptable for a once-a-day game; not real-time (Julien's Notion note — confirmed).
+- **Prototype 1 reads Firestore directly** (no warehouse hop), so the value is as fresh as the user's
+  last app open — no ~24–48h warehouse lag. The board refreshes once a day, which is all a daily game needs.
 
-## The weekday-overwrite trap (must-read for the extraction)
+## The weekday-overwrite trap (must-read for the daily read)
 
 The Firestore source `realtimeScreentimeBenchmarks` is **not a daily log** — it's a **7-slot weekday
 ring buffer**:
@@ -43,11 +43,10 @@ ring buffer**:
 - So if a user's upload **doesn't run on a given day, that weekday's slot still holds *last week's*
   value** — the doc isn't empty, it's stale by 7 days.
 
-**Safeguard (already baked into the plan):** the warehouse extraction must set `activity_date` from
-the doc's **`date`** field (the day the total is *for*), never from extraction time; and the
-FocusBoard accrual counts by `activity_date`. A stale slot then carries an old `activity_date`
-(≤ `last_counted_date`) and is harmlessly skipped. Extract **≥ daily** so no real day is overwritten
-before it's pulled.
+**Safeguard (baked into the plan):** the updater accrues by each doc's **`date`** field (the day the
+total is *for*), never by the slot's existence. A stale slot then carries an old `date`
+(≤ `last_counted_date`) and is harmlessly skipped. **Pull daily** and persist each day before its slot
+is overwritten — there's no history to fall back on.
 
 ## Coverage gaps (expect missing days, by design)
 
@@ -83,5 +82,6 @@ reducing usage — accepted for the first prototype.
 **V3 wire-compatible** shape. It is **not a stable downstream data contract**: a refactor of the
 benchmark feature (doc-id scheme, V3 retirement) could change or break it silently. There is also
 **no long-term history** available here — only the ~7 weekday slots. Both are fine for the
-rolling-window, previous-day-only design, but worth knowing before anything depends on it more
-heavily.
+rolling-window, previous-day-only design (the prototype reads Firestore directly and persists each day;
+durable history via Snowflake is a schools-rollout concern), but worth knowing before anything depends
+on it more heavily.
