@@ -1,0 +1,6 @@
+state.json
+service-account.json
+*.py
+*.pyc
+__pycache__/
+crest.png
