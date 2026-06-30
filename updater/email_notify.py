@@ -11,7 +11,8 @@ from email.message import EmailMessage
 ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
-FROM_ADDR = "nate@opalapp.com"
+FROM_ADDR = "nate@opal.so"
+LEADERBOARD_URL = "https://updater-bice.vercel.app/"
 
 
 def _load_env():
@@ -57,6 +58,7 @@ def _build_message(gem, team_name, place, leading_team):
     body = (
         f"Hey {gem}, I am reaching out to confirm that you have been added to the "
         f"leaderboard, and are now competing for your school. {middle}\n\n"
+        f"Click this link to view the leaderboard-> {LEADERBOARD_URL}\n\n"
         "Wishing you luck,\n"
         "Nate"
     )
