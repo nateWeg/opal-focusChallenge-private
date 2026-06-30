@@ -3,22 +3,24 @@ import json
 import os
 from google.cloud import firestore
 import typeform_sync
+import email_notify
 typeform_sync.run()
 
 PROJECT_ID = "opal-fa413"
 BASELINE_SECONDS = 25200  # fixed 7h
-MAX_SCREENTIME = 43200   # 12h cap — above this treated as missing/corrupted
+MAX_SCREENTIME = 39600   # 11h cap — above this treated as outlier/neutral
 
 MILESTONES = [
-    {"hours": 100,  "reward": "Instagram Shoutout + Free Merch Raffle"},
-    {"hours": 500,  "reward": "Free Dumb Phone Raffle"},
+    {"hours": 100,  "reward": "Instagram Shoutout"},
+    {"hours": 500,  "reward": "Free Merch Raffle"},
     {"hours": 1000, "reward": "Opal Sponsored Party"},
 ]
 REWARD_FORM_URL = "https://opal.so"  # replace with real Typeform URL when ready
 
-TEAMS_FILE = os.path.join(os.path.dirname(__file__), "teams.json")
-STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
-OUT_FILE   = os.path.join(os.path.dirname(__file__), "leaderboard-data.json")
+TEAMS_FILE  = os.path.join(os.path.dirname(__file__), "teams.json")
+STATE_FILE  = os.path.join(os.path.dirname(__file__), "state.json")
+EMAILS_FILE = os.path.join(os.path.dirname(__file__), "emails.json")
+OUT_FILE    = os.path.join(os.path.dirname(__file__), "leaderboard-data.json")
 
 db = firestore.Client(project=PROJECT_ID)
 
@@ -35,7 +37,15 @@ if os.path.exists(STATE_FILE):
 else:
     state = {}
 
-def process_gems(gems):
+if os.path.exists(EMAILS_FILE):
+    with open(EMAILS_FILE) as f:
+        emails = json.load(f)
+else:
+    emails = {}
+
+pending_welcomes = []   # (gem_key, gem_display, email, team_name) for new members not yet welcomed
+
+def process_gems(gems, team_name):
     members = []
     for gem in gems:
         print(f"Looking up '{gem}'...")
@@ -53,8 +63,13 @@ def process_gems(gems):
                 "user_id":     user_id,
                 "gem_display": gem_display,
                 "joined_date": two_days_ago.isoformat(),
+                "welcomed":    False,
             }
             print(f"  New gem — joined_date set to {two_days_ago}")
+
+        # Queue a welcome email for anyone not yet welcomed who has an email on file
+        if not state[key].get("welcomed") and key in emails:
+            pending_welcomes.append((key, gem_display, emails[key], team_name))
 
         joined_date = datetime.date.fromisoformat(state[key]["joined_date"])
         print(f"  {gem_display} | joined: {joined_date} | user_id: {user_id}")
@@ -78,11 +93,14 @@ def process_gems(gems):
             if day < joined_date or day > two_days_ago:
                 continue
 
-            if not screentime or screentime <= 0 or screentime > MAX_SCREENTIME:
+            if not screentime or screentime <= 0:
+                hours_saved = 0
+                missing     = True
+            elif screentime > MAX_SCREENTIME:                 # >11h — outlier/corrupted, neutral
                 hours_saved = 0
                 missing     = True
             else:
-                hours_saved = max(0, BASELINE_SECONDS - screentime) / 3600
+                hours_saved = (BASELINE_SECONDS - screentime) / 3600   # negative for 7–11h = lost hours
                 missing     = False
 
             days.append({
@@ -104,7 +122,18 @@ def process_gems(gems):
 
         total_saved  = round(sum(d["hours_saved"] for d in all_days), 2)
         latest_saved = all_days[-1]["hours_saved"] if all_days else 0.0
-        print(f"  {len(all_days)} days in window → {total_saved}h saved")
+
+        streak = 0
+        for d in all_days:
+            if d["missing"]:
+                continue                      # NA — neutral
+            if d["hours_saved"] > 0:
+                streak += 1
+            elif d["hours_saved"] < 0:
+                streak = 0                    # only a loss ends it
+            # hours_saved == 0 → neutral
+
+        print(f"  {len(all_days)} days in window → {total_saved}h saved, streak {streak}")
 
         members.append({
             "gem":         gem_display,
@@ -112,6 +141,7 @@ def process_gems(gems):
             "days":        all_days,
             "total_saved": total_saved,
             "latest_saved": latest_saved,
+            "streak":      streak,
         })
     return members
 
@@ -121,6 +151,7 @@ def members_to_json(members):
             "gemName":          m["gem"],
             "hoursSaved":       m["total_saved"],
             "latestHoursSaved": m["latest_saved"],
+            "streak":           m["streak"],
             "days": [
                 {
                     "date":        d["date"].isoformat(),
@@ -136,7 +167,7 @@ def members_to_json(members):
 
 all_teams = []
 for team_cfg in teams_config:
-    members = process_gems(team_cfg["gems"])
+    members = process_gems(team_cfg["gems"], team_cfg["teamName"])
     members.sort(key=lambda m: m["total_saved"], reverse=True)
     team_total = round(sum(m["total_saved"] for m in members), 2)
     team_daily = round(sum(m["latest_saved"] for m in members), 2)
@@ -149,6 +180,17 @@ for team_cfg in teams_config:
         "members":         members_to_json(members),
     })
     print(f"\n{team_cfg['teamName']}: {team_total}h total, +{team_daily}h yesterday")
+
+# Welcome emails for new members — rank teams by total hours saved (1-indexed)
+if pending_welcomes:
+    ranked = sorted(all_teams, key=lambda t: t["totalHoursSaved"], reverse=True)
+    place_by_team = {t["teamName"]: i + 1 for i, t in enumerate(ranked)}
+    leading_team = ranked[0]["teamName"] if ranked else ""
+    print(f"\nWelcome emails ({len(pending_welcomes)} pending):")
+    for gem_key, gem_display, to_email, team_name in pending_welcomes:
+        place = place_by_team.get(team_name, len(ranked))
+        if email_notify.send_welcome(to_email, gem_display, team_name, place, leading_team):
+            state[gem_key]["welcomed"] = True
 
 with open(STATE_FILE, "w") as f:
     json.dump(state, f, indent=2)
