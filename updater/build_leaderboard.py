@@ -195,6 +195,55 @@ if pending_welcomes:
 with open(STATE_FILE, "w") as f:
     json.dump(state, f, indent=2)
 
+# ── Mock demo team (Harvard) — synthetic, NOT from Firestore ──────────────────
+# For demos. Total is ~25h today and grows +1h each calendar day. Remove this
+# block (set MOCK_TEAMS = False) to drop the fake team.
+MOCK_TEAMS = True
+
+def build_mock_harvard():
+    anchor = datetime.date(2026, 6, 30)          # ~25h as of this date
+    total  = 25 + max(0, (today - anchor).days)  # +1h/day thereafter
+    ndays  = 8
+    start  = two_days_ago - datetime.timedelta(days=ndays - 1)
+    specs  = [("pixelgoblin", 0.40), ("noodlebandit", 0.34), ("ferret_lord99", 0.26)]
+    weights = list(range(1, ndays + 1))          # increasing daily ramp
+    wsum = sum(weights)
+
+    members = []
+    for name, share in specs:
+        target, running, days, cur = round(total * share, 2), 0.0, [], start
+        for i, w in enumerate(weights):
+            hs = round(target - running, 2) if i == ndays - 1 else round(target * w / wsum, 2)
+            hs = max(0.0, hs); running += hs
+            days.append({
+                "date":        cur.isoformat(),
+                "screentimeH": round(max(0.0, 7 - hs), 2),
+                "hoursSaved":  hs,
+                "missing":     False,
+            })
+            cur += datetime.timedelta(days=1)
+        members.append({
+            "gemName":          name,
+            "hoursSaved":       round(sum(d["hoursSaved"] for d in days), 2),
+            "latestHoursSaved": days[-1]["hoursSaved"],
+            "streak":           ndays,
+            "days":             days,
+        })
+    members.sort(key=lambda m: m["hoursSaved"], reverse=True)
+    return {
+        "teamName":        "Harvard University",
+        "totalHoursSaved": round(sum(m["hoursSaved"] for m in members), 2),
+        "dailyHoursSaved": round(sum(m["latestHoursSaved"] for m in members), 2),
+        "goalHours":       MILESTONES[0]["hours"],
+        "memberCount":     len(members),
+        "members":         members,
+    }
+
+if MOCK_TEAMS:
+    harvard = build_mock_harvard()
+    all_teams.append(harvard)
+    print(f"\n[mock] {harvard['teamName']}: {harvard['totalHoursSaved']}h total ({harvard['memberCount']} mock gems)")
+
 leaderboard = {
     "milestones":  MILESTONES,
     "generatedAt": today.isoformat(),

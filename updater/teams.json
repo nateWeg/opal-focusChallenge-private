@@ -25,6 +25,13 @@
   },
   {
     "teamName": "UC Berkeley",
+    "aliases": [
+      "Berkeley",
+      "Cal",
+      "University of California Berkeley",
+      "University of California, Berkeley",
+      "UC Berkeley"
+    ],
     "gems": [
       "TalaeTui2154"
     ]
@@ -33,6 +40,17 @@
     "teamName": "Downingtown STEM Academy",
     "gems": [
       "Lanthanite008"
+    ]
+  },
+  {
+    "teamName": "Poly Prep Country Day School",
+    "aliases": [
+      "Poly Prep",
+      "Poly Prep Country Day",
+      "PPCDS"
+    ],
+    "gems": [
+      "RamblingPotato67"
     ]
   }
 ]

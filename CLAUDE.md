@@ -79,6 +79,14 @@ Edit `updater/teams.json` — add the gem name to the relevant team's `gems` arr
 
 Edit `updater/teams.json` — append a new object: `{"teamName": "School Name", "gems": ["gem1", "gem2"]}`. Then run the updater.
 
+**School-name matching (Typeform signups):** when a signup's typed school name is matched to a team, `typeform_sync.py` tries, in order: exact match on the team name or any alias → substring containment (e.g. "Poly Prep" ⊂ "Poly Prep Country Day School") → fuzzy match (threshold `0.72`). Anything below that creates a new team.
+
+**Aliases:** add an optional `"aliases"` array to a team to catch the ways students actually type its name, e.g.:
+```json
+{ "teamName": "UC Berkeley", "aliases": ["Berkeley", "Cal"], "gems": ["gem1"] }
+```
+Aliases are the reliable fix for short forms fuzzy matching can't reach (e.g. "Cal"). Add them as you discover new variants.
+
 ## Vercel project info
 
 - **Project name:** `updater`

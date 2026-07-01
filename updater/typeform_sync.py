@@ -48,13 +48,37 @@ def _normalize_school(name):
     return n.rstrip(", the")
 
 
-def _find_matching_team(school_input, teams, threshold=0.82):
+def _team_names(t):
+    """Canonical team name plus any aliases listed on the team."""
+    return [t["teamName"]] + list(t.get("aliases", []))
+
+
+def _find_matching_team(school_input, teams, threshold=0.72):
     norm = _normalize_school(school_input)
+    if not norm:
+        return None
+
+    # 1. Exact match against team name or any alias (normalized)
+    for t in teams:
+        if any(norm == _normalize_school(n) for n in _team_names(t)):
+            return t
+
+    # 2. Substring containment — catches abbreviations like
+    #    "poly prep" ⊂ "poly prep country day school" (guard len to avoid tiny inputs)
+    if len(norm) >= 4:
+        for t in teams:
+            for n in _team_names(t):
+                nn = _normalize_school(n)
+                if nn and (norm in nn or nn in norm):
+                    return t
+
+    # 3. Fuzzy fallback across name + aliases
     best, best_score = None, 0.0
     for t in teams:
-        score = difflib.SequenceMatcher(None, norm, _normalize_school(t["teamName"])).ratio()
-        if score > best_score:
-            best_score, best = score, t
+        for n in _team_names(t):
+            score = difflib.SequenceMatcher(None, norm, _normalize_school(n)).ratio()
+            if score > best_score:
+                best_score, best = score, t
     return best if best_score >= threshold else None
 
 
